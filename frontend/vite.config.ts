@@ -21,7 +21,7 @@ export default defineConfig({
   },
   build: {
     // Targets Spring Boot's static resources folder directly for production builds
-    outDir: '../src/main/resources/static',
+    outDir: '../backend/src/main/resources/static',
     emptyOutDir: true, // Clears old builds before building new ones
   },
 })
