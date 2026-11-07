@@ -1,31 +1,31 @@
 package com.quota.backend.repository;
 
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 import com.quota.backend.model.Resource;
 import com.quota.backend.model.ResourceType;
 
 public class ResourceRepository {
     
-    private static String UUIDKey = "quotaApplication";
-    private static List<Resource> resources = List.of(
-            new Resource(UUID.nameUUIDFromBytes(UUIDKey.getBytes()), "Room 1", ResourceType.ROOM, ZoneId.of("America/Los_Angeles")), 
-            new Resource(UUID.nameUUIDFromBytes(UUIDKey.getBytes()), "Desk 2", ResourceType.DESK, ZoneId.of("America/Los_Angeles")),
-            new Resource(UUID.nameUUIDFromBytes(UUIDKey.getBytes()), "Equipment 3", ResourceType.EQUIPMENT, ZoneId.of("America/Los_Angeles"))
-        );
-    private static HashMap<UUID,Resource> map = resources.stream().collect(Collectors.toMap(
-        Resource::id,               // Key mapper
-        user -> user,                  // Value mapper
-        (existing, replace) -> existing, // Merge function (handles duplicate keys if any)
-        HashMap::new                   // Maps supplier explicitly to a HashMap
-    ));
+    private static final HashMap<UUID,Resource> map = new HashMap<>();
+    static {
+        UUID roomUuid = UUID.nameUUIDFromBytes("Room 1".getBytes());
+        map.put(roomUuid, new Resource(roomUuid, "Room 1", ResourceType.ROOM, ZoneId.of("America/Los_Angeles")));
+
+        UUID deskUuid = UUID.nameUUIDFromBytes("Desk 2".getBytes());
+        map.put(deskUuid, new Resource(deskUuid, "Desk 2", ResourceType.DESK, ZoneId.of("America/Los_Angeles")));
+
+        UUID eqUuid = UUID.nameUUIDFromBytes("Equipment 3".getBytes());
+        map.put(eqUuid, new Resource(eqUuid, "Equipment 3", ResourceType.EQUIPMENT, ZoneId.of("America/Los_Angeles")));
+        
+    }
 
     public static List<Resource> getResources(){
-        return resources;
+        return new ArrayList<>(map.values());
     }
     public static Resource getResourceById(UUID id){
         return map.get(id);

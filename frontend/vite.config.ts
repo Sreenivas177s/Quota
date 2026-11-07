@@ -9,7 +9,7 @@ export default defineConfig({
     babel({ presets: [reactCompilerPreset()] })
   ],
   server: {
-    port: 3000,
+    port: 8081,
     proxy: {
       // Proxies all requests starting with /api to Spring Boot
       '/api': {

@@ -48,6 +48,37 @@
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>
 			</plugin>
+			<plugin>
+				<groupId>cz.habarta.typescript-generator</groupId>
+				<artifactId>typescript-generator-maven-plugin</artifactId>
+				<version>3.2.1263</version>
+				<executions>
+					<execution>
+						<?m2e execute onConfiguration?>
+						<id>generate</id>
+						<goals>
+							<goal>generate</goal>
+						</goals>
+						<phase>compile</phase>
+					</execution>
+				</executions>
+				<configuration>
+					<jsonLibrary>jackson2</jsonLibrary>
+					<!-- 1. Tell it exactly which Java package to scan -->
+					<!-- <classes>
+						<class>com.example.model.Resource</class>
+					</classes> -->
+					<classPatterns>
+						<classPattern>com.quota.backend.model.**</classPattern>
+					</classPatterns> 
+					<outputKind>module</outputKind>
+					<outputFileType>implementationFile</outputFileType>
+					
+					<!-- 2. Set the destination path straight into your React source tree -->
+					<outputFile>../frontend/src/types/api.ts</outputFile>
+				</configuration>
+			</plugin>
+
 		</plugins>
 	</build>
 
