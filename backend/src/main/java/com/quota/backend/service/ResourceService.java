@@ -1,12 +1,12 @@
-package com.sreenivas.quota.service;
+package com.quota.backend.service;
 
 import java.util.List;
 import java.util.UUID;
 
 import org.springframework.stereotype.Service;
 
-import com.sreenivas.quota.model.Resource;
-import com.sreenivas.quota.repository.ResourceRepository;
+import com.quota.backend.model.Resource;
+import com.quota.backend.repository.ResourceRepository;
 
 @Service 
 public class ResourceService {

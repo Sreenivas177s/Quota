@@ -1,4 +1,4 @@
-package com.sreenivas.quota.model;
+package com.quota.backend.model;
 
 public enum ResourceType {
     ROOM(),

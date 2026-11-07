@@ -1,12 +1,12 @@
-package com.sreenivas.quota.repository;
+package com.quota.backend.repository;
 
 import java.util.HashMap;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-import com.sreenivas.quota.model.Resource;
-import com.sreenivas.quota.model.ResourceType;
+import com.quota.backend.model.Resource;
+import com.quota.backend.model.ResourceType;
 
 public class ResourceRepository {
     

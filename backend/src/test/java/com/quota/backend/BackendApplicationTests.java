@@ -1,10 +1,10 @@
-package com.sreenivas.quota;
+package com.quota.backend;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 
 @SpringBootTest
-class QuotaApplicationTests {
+class BackendApplicationTests {
 
 	@Test
 	void contextLoads() {

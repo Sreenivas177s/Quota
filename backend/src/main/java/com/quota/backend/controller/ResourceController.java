@@ -1,12 +1,10 @@
-package com.sreenivas.quota.controller;
+package com.quota.backend.controller;
 
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.sreenivas.quota.model.Resource;
-import com.sreenivas.quota.service.ResourceService;
+import com.quota.backend.model.Resource;
+import com.quota.backend.service.ResourceService;
 
 import java.util.List;
 import java.util.UUID;

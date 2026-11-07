@@ -1,4 +1,4 @@
-package com.sreenivas.quota.model;
+package com.quota.backend.model;
 
 import java.util.UUID;
 

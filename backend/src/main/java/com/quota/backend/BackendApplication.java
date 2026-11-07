@@ -1,13 +1,13 @@
-package com.sreenivas.quota;
+package com.quota.backend;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 @SpringBootApplication
-public class QuotaApplication {
+public class BackendApplication {
 
 	public static void main(String[] args) {
-		SpringApplication.run(QuotaApplication.class, args);
+		SpringApplication.run(BackendApplication.class, args);
 	}
 
 }
