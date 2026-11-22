@@ -1,11 +1,11 @@
-# Resource booking platform: hands-on course plan
+# Resources microservice: hands-on Java course plan
 
-**Status:** Approved course outline, expanded into a persistent master plan.
-**Planning date:** 2026-11-05.
-**Goal:** Learn to independently write, test, debug, and explain a portfolio-ready React and Spring Boot resource booking application on Java 21.
-**Architecture:** One growing application, built as a modular monolith with a React client, a Spring MVC backend, and PostgreSQL. Introduce infrastructure only when an exercise needs it.
-**Execution:** The learner writes the application by hand. Future assistants generate individual chapter guides, provide graduated hints, and review attempts; they must not implement the application or reveal solutions unless explicitly asked.
-**Specification:** This file contains the agreed course scope, application policies, chapter sequence, and chapter-generation contract. No earlier conversation is required.
+**Status:** Revised master plan; Resources microservice sequence.
+**Planning date:** 2026-11-22.
+**Goal:** Learn to independently design, build, test, debug, and operate a Java Spring Boot Resources microservice, then integrate it with another Java service and a React frontend.
+**Architecture:** The Resources service owns the resource catalog and its database and is independently runnable and deployable. A small companion Java service later consumes its versioned API. React is added after the backend service boundaries and contracts are understood. Avoid distributed infrastructure until an exercise has a concrete need for it.
+**Execution:** Complete and test the Resources Spring server before beginning Phase 2 frontend work. Java microservice integration follows the frontend phase. The learner writes the application by hand. Future assistants generate individual chapter guides, provide graduated hints, and review attempts; they must not implement the application or reveal solutions unless explicitly asked.
+**Specification:** This file contains the course scope, application policies, authoritative chapter sequence, and chapter-generation contract. No earlier conversation is required.
 
 ## 1. Learning agreement
 
@@ -14,7 +14,9 @@
 - Make sessions approximately 45-60 minutes, allowing difficult tasks to span sessions.
 - Finish familiar foundations quickly through demonstration-based fast-track gates.
 - Keep related concepts together in manageable chapters rather than scattering isolated framework features.
-- Build one application throughout; debugging exercises use that application, not unrelated mini-projects.
+- Build one product system across independently deployable services; keep each service's code, data, and runtime boundary clear rather than creating unrelated mini-projects.
+- Keep the first phase backend-only: exercise endpoints with backend tests and an HTTP client, not a React app. Begin frontend work only after the Resources service phase gate is met.
+- Teach microservice boundaries through independent ownership, deployment, API contracts, configuration, and failure handling. Do not introduce a shared database, generic platform framework, or infrastructure for its own sake.
 - Include writing tests in every chapter, starting with the first vertical slice.
 - Teach both failure investigation and failure prevention. Do not equate adding a defensive check with understanding a root cause.
 - Keep hints, solution sketches, and reference implementations separate from exercise instructions.
@@ -38,120 +40,179 @@ Every generated chapter must include: prerequisites; starting state; user storie
 
 Each session must state a concrete deliverable, an approximate time budget, test scenarios, a debugging observation, and a stopping point. Split oversized work rather than forcing it into one hour. No complete implementation or completed test bodies by default.
 
-## 2. Application specification
+## 2. Resources service specification
 
-### Product and actors
+### Service boundary and product
 
-Build a shared-resource booking platform for organizations operating workspaces, meeting rooms, and equipment. A resource represents one individually reservable item, not pooled inventory.
+Build an independently runnable Spring Boot microservice that owns the catalog and lifecycle of reservable resources such as rooms, desks, and equipment. The service is responsible for resource data and its API; it does not own reservations, members, booking rules, or booking workflows.
 
-- Visitor: sees the local demonstration catalog before authentication exists; anonymous production access is out of scope initially.
-- Member: finds resources, checks availability, books, views personal reservations, and cancels eligible reservations.
-- Manager: manages resources, maintenance windows, and restricted-resource approvals within their organization.
-- Organization administrator: manages memberships and roles within their organization.
+- Resource managers create, inspect, update, and archive resources through the service API.
+- API consumers list and inspect resources. The React application and the later Java consumer use the API, never the Resources database.
+- A companion `booking-service` may be introduced as a separate learning service. It owns any reservation data it adds and treats Resources as a remote dependency.
+- Authentication may begin with a clearly local development setup, but production authorization must be enforced by the service, not by hidden UI controls.
 
-Before Chapter 8, use an explicitly local development identity, never request-provided ownership. Replace it with authenticated identity in Chapter 8. Do not expose these early releases publicly.
+### Resource policies
 
-### Standout portfolio workflows
+- A resource has a stable UUID, name, type, IANA `ZoneId`, organization identifier, and lifecycle status.
+- Validate names, types, zones, and organization scope at the service boundary. Return stable machine-readable errors without stack traces.
+- Archive resources rather than hard-delete them; historical or external references must remain meaningful.
+- List/search APIs use deterministic sorting and bounded pagination. Organization-owned reads and writes are always scoped to the authenticated organization once identity is introduced.
+- The Resources service is the source of truth for resource data. No other service may read or write its tables directly.
+- Version the HTTP API and document it with an OpenAPI contract. Evolve contracts compatibly where practical; make breaking changes explicit.
+- Keep service-to-service calls bounded by timeouts and handle remote failure explicitly. Retry only operations whose semantics make retry safe.
 
-1. Two browser sessions compete for one resource: only one overlapping reservation succeeds.
-2. A user books in a different time zone and sees the same instant consistently after reload.
-3. A manager approves a restricted-resource booking using an auditable state transition.
-4. A cancellation opens a slot and triggers an expiring waitlist offer without double allocation.
-5. A user attempts cross-organization access by changing identifiers and is denied.
-6. A notification worker restarts after a failure and resumes durable work with controlled duplication.
-7. A recurring series crosses a daylight-saving boundary and follows an explicit local-time policy.
-8. A slow-query investigation produces an evidence-backed improvement rather than speculative optimization.
+### Microservice learning goals
 
-### Core booking policies
+Practice a meaningful service boundary, independent startup and deployment, service-owned persistence, API and error contracts, externalized configuration, health/readiness, logs/metrics, containerized local composition, and consumer-driven integration tests. Service discovery, Kubernetes, a message broker, and an API gateway are outside the core course unless a later requirement justifies them.
 
-- A reservation has one resource, an owner, a start instant, an end instant, and a status.
-- Use half-open intervals: start is included and end is excluded. Back-to-back bookings are valid.
-- Require start before end and a start in the future at creation, using a server-controlled, injectable clock.
-- Persist instants consistently and retain IANA zone identifiers for local scheduling rules. Do not treat a numeric UTC offset as a time zone.
-- Initially enforce 30-minute minimum and 8-hour maximum duration. Keep these values centralized and test their boundaries.
-- Initially give resources a named zone and weekday opening hours of 08:00-18:00 in that zone; reject bookings crossing the closing boundary or a closed day.
-- Seed a clearly documented resource zone and supply test cases in at least two zones, including one with daylight-saving transitions.
-- Confirmed reservations block availability. Cancelled and rejected reservations do not.
-- Availability responses are advisory. A write must recheck rules atomically, and the database must protect against concurrent overlaps.
-- Do not silently modify a reservation's times. Use explicit cancellation and a new booking until a later rescheduling extension.
-- Allow owners to cancel before start. Started or completed reservations cannot be cancelled through the ordinary member workflow.
-- Preserve booking history; archive a referenced resource rather than deleting its historical reservations.
-
-### Later workflow policies
-
-- Approval: pending requests do not reserve capacity. Approval rechecks availability atomically; conflicting pending requests may coexist. Explain this policy in the interface.
-- Maintenance: managers may create a blocking closure only if it does not overlap a capacity-blocking reservation. Return conflicts rather than silently cancelling reservations.
-- Recurrence: support weekly local-time series first, with at most 12 occurrences. Initial creation is all-or-nothing; list conflicts before the learner builds partial-acceptance extensions.
-- DST: reject ambiguous or nonexistent local start/end times with an actionable error in the first recurrence implementation; do not silently shift them.
-- Waitlists: request a specific resource and exact interval, ordered by join time with a stable identifier tie-breaker. Exclude approval-required resources from the first waitlist implementation.
-- Offers: only the earliest eligible waiter receives a five-minute offer. An active offer holds capacity; confirmation and expiry race safely. Expired offers release capacity before the next promotion.
-- Tenant isolation: every organization-owned lookup and mutation is scoped to the authenticated membership, including search, live events, jobs, and exports.
-- Audit: record actor, organization, action, entity, timestamp, and relevant before/after fields; do not log credentials or unnecessary personal data.
-- Delivery: durable event processing is at-least-once. Deduplicate internal work and use provider idempotency where supported; never claim universal exactly-once email delivery.
+Booking rules and workflows from the previous course plan are not part of the Resources service. They remain optional material for a separate booking-service extension and must not be used to expand the Resources service boundary.
 
 ## 3. Stack and repository conventions
 
 ### Version policy
 
-This plan does not assert an unverified latest version. At Chapter 1 generation time, verify official stable releases and Java 21 compatibility, then record exact versions and verification date. Use stable releases, not previews, snapshots, or release candidates.
+This plan does not assert an unverified latest version. The current backend POM targets Java 25 and Spring Boot 4.1.2; treat the POM and generated Maven Wrapper as the current executable baseline, and reconcile `docs/versions.md` with them before generating the first guide. If the project intentionally changes versions, verify official compatibility and record the decision. Use stable releases, not previews, snapshots, or release candidates.
 
-- Java: 21, without preview features.
-- Backend: current stable Java-21-compatible Spring Boot, Spring MVC, Maven Wrapper, Bean Validation, Spring Data JPA, Spring Security.
+- Java: the version selected in `backend/pom.xml` (currently 25), without preview features.
+- Backend: the Spring Boot version selected in `backend/pom.xml` (currently 4.1.2), Spring MVC, Maven Wrapper, Bean Validation, Spring Data JPA, Spring Security, and Actuator as introduced by the relevant chapter.
+- Service integration: a maintained Spring HTTP client and test server for remote API tests; add resilience tooling only when its behavior is taught and tested.
 - Frontend: current stable React and TypeScript, Vite, and a supported Node.js LTS compatible with the selected tools.
 - Database: a supported PostgreSQL release, with Flyway migrations.
 - Frontend tests: Vitest, React Testing Library, user-event, and Mock Service Worker when network mocking becomes useful.
-- Backend tests: JUnit Jupiter; Mockito for useful isolated boundaries; Spring test support; PostgreSQL Testcontainers for database behavior.
+- Backend tests: JUnit Jupiter; Mockito for useful isolated boundaries; Spring test support; PostgreSQL Testcontainers for the Resources-owned database and contract/integration tests for remote consumers.
 - Browser tests: Playwright. Later load experiments may use k6 or another documented maintained tool.
-- Calendar and recurrence: evaluate maintained libraries before implementation; do not build a calendar engine or recurrence parser from scratch.
+- API contract: OpenAPI, with generated client types only if they fit the existing build and are verified against the actual API.
 
 Use official documentation for verification. Pin reproducible versions in manifests and lockfiles. Do not blindly upgrade mid-chapter; treat upgrades as a documented maintenance exercise.
 
-### Proposed paths
+### Repository and service layout
 
-These are planned locations, not files that already exist:
+The current `backend/` directory is the Resources microservice; `frontend/` is its eventual React client. Keep these current paths unless a concrete build or deployment need justifies a move. A future Java consumer is a separate application with its own build, configuration, tests, and persistence:
 
 ```text
-frontend/                      React application and colocated component tests
-frontend/src/features/         Resource, booking, administration, identity features
-backend/                       Spring Boot project with Maven Wrapper
-backend/src/main/java/         Feature packages under com.example.booking
-backend/src/main/resources/    Configuration and Flyway migrations
-backend/src/test/java/         Unit, web, security, and integration tests
-e2e/                          Playwright cross-application workflows
-docs/chapters/                 Generated chapter guides
-docs/decisions/                Short architectural decision records
-docs/debugging/                Learner investigation notes
-docs/versions.md               Verified versions and prerequisites
-docs/progress.md               Current chapter, checks, decisions, and next task
+backend/                         Resources microservice, Maven Wrapper, independent lifecycle
+backend/src/main/java/com/quota/backend/   Resource API, domain, persistence, and configuration
+backend/src/main/resources/      Service configuration and Flyway migrations
+backend/src/test/java/           Unit, web, database, security, and contract tests
+frontend/                        React client added after the backend phase
+services/booking-service/        Optional later Java consumer; separate database and lifecycle
+e2e/                              Cross-service and browser workflows when introduced
+docs/chapters/                    Generated chapter guides
+docs/decisions/                   Service-boundary and API decisions
+docs/debugging/                   Learner investigation notes
+docs/versions.md                  Verified versions and prerequisites
+docs/progress.md                  Current chapter, checks, decisions, and next task
 ```
 
-Keep backend packages feature-oriented: resource, booking, identity, organization, and notification as they become necessary. Separate HTTP DTOs from persistence entities. Avoid generic base controllers, a speculative shared framework, or splitting services into separate deployments.
+Keep the Resources service internally cohesive with focused resource, API, persistence, and configuration packages. Separate HTTP DTOs from persistence entities. The future consumer must call the Resources API and must not import its persistence entities or access its database. Avoid generic base controllers, speculative shared libraries, and unnecessary service splits.
 
 ### HTTP conventions
 
-- Prefix application endpoints with `/api`; use UUID identifiers and ISO-8601 offset-bearing timestamps for instants.
-- Start with `GET /api/resources` and `GET /api/resources/{id}`.
-- Introduce `POST /api/bookings`, `GET /api/bookings`, `GET /api/bookings/{id}`, and `POST /api/bookings/{id}/cancel` when their chapter requires them.
-- Use 400 for malformed/invalid input, 401 for missing authentication, 403 for denied actions on visible resources, 404 for absent or inaccessible tenant-owned identifiers, and 409 for booking/state/version conflicts.
-- Introduce consistent Problem Details errors in Chapter 4 with stable machine-readable codes and field errors. Do not expose stack traces.
-- Define pagination envelopes and deterministic sorting in Chapter 3; cap page size at 100 and default to 20.
-- Record later endpoint and DTO decisions in each chapter handoff so future generators do not reinvent contracts.
+- Version Resources endpoints under `/api/v1`; preserve the existing `GET /api/v1/resources` and `GET /api/v1/resources/{id}` routes.
+- Add create, update, and archive operations in the chapter that introduces resource lifecycle. Use UUID identifiers and explicit request/response DTOs.
+- Use 400 for malformed/invalid input, 401 for missing authentication, 403 for denied actions, 404 for absent or inaccessible resources, and 409 for state/version conflicts.
+- Define consistent Problem Details errors with stable machine-readable codes and field errors. Do not expose stack traces.
+- Define pagination envelopes and deterministic sorting when resource querying is introduced; cap page size at 100 and default to 20.
+- Publish and test an OpenAPI contract. The companion service consumes this contract over HTTP; never share database tables or assume in-process calls.
+- Record endpoint, compatibility, timeout, and error-handling decisions in each chapter handoff so future consumers do not reinvent contracts.
 
 ### Test and debugging rules
 
-- Test user-visible behavior and domain invariants, not implementation details or snapshot volume.
-- Keep domain tests fast; use PostgreSQL, not an in-memory substitute, for database constraints and concurrency.
-- Coordinate concurrency tests with barriers/latches rather than arbitrary sleeps. Assert persisted state as well as HTTP results.
-- Use injected clocks and controlled timers instead of waiting for reminders or offer expiry in tests.
-- Test security through direct HTTP requests, not only hidden UI controls.
-- Reproduce asynchronous frontend failures with controlled response ordering.
+- Test service behavior and resource invariants, not implementation details or snapshot volume.
+- Keep domain tests fast; use PostgreSQL, not an in-memory substitute, for persistence and database constraints.
+- Test HTTP contracts at the service boundary. For consumers, use a controlled HTTP test server or contract test rather than reaching into the Resources service database.
+- Test timeouts, unavailable dependencies, malformed responses, and safe retry behavior in the chapter that introduces remote calls.
+- Test authorization through direct service HTTP requests, not only hidden UI controls.
+- Reproduce asynchronous frontend failures with controlled response ordering after the frontend phase begins.
 - Never introduce intentionally vulnerable faults into a deployed environment. Use a local scratch change, reproduce, repair, and leave the baseline passing.
 - Document focused commands when each tool is installed; do not invent commands or claim unrun checks passed.
 - Do not require a fixed coverage percentage. Require demonstrated detection of meaningful defects.
 
 ## 4. Chapter roadmap
 
-Chapters are independently generatable, not independent implementations. Each uses the preceding application's contracts. A chapter generator must inspect the current repository and handoff before changing requirements or assuming code exists.
+Chapters are independently generatable, not independent implementations. This sequence is authoritative. Chapters 01-05 complete the Resources Spring server. Chapters 06-08 are Phase 2: return to the React frontend after the server completion gate. Chapters 09-10 add the separate Java consumer and multi-service operations. Chapter 11 verifies and releases the complete system. Earlier booking-platform briefs below are legacy topic material only and do not define this course's scope or order. The existing Chapter 01 guide predates this revision and must be regenerated; inspect the current repository and reuse existing work rather than assuming it is empty.
+
+### Phase 1: Complete the Resources Spring server
+
+Use backend tests and direct HTTP requests. The existing frontend may remain in the repository, but return to frontend feature work only after Chapter 05's server completion gate.
+
+#### Chapter 01: Resources service foundation
+
+**Outcome:** Understand the service boundary and verify the existing Spring Boot service's list/detail API, startup, and tests.
+**Focus:** Java/Spring project structure, dependency injection, controller-service-repository flow, API versioning, DTOs, HTTP status, deterministic behavior, unit versus web tests.
+**Gate:** Explain what Resources owns, run the service and focused tests, and verify `GET /api/v1/resources` and `GET /api/v1/resources/{id}` directly. Record actual project versions and commands.
+
+#### Chapter 02: Resource lifecycle and API contracts
+
+**Outcome:** Create, update, validate, and archive resources through a stable versioned API.
+**Focus:** REST semantics, request validation, domain invariants, Problem Details, OpenAPI, compatibility, error handling, API tests.
+**Gate:** Valid and invalid requests have documented outcomes; archived resources remain identifiable; the OpenAPI contract matches the tested HTTP behavior.
+
+#### Chapter 03: Service-owned persistence
+
+**Outcome:** The Resources service owns durable resource data in PostgreSQL and can recreate its schema from migrations.
+**Focus:** JPA, repository boundaries, Flyway, constraints, configuration, Testcontainers, migration and restart behavior.
+**Gate:** PostgreSQL-backed tests prove persistence and constraints; a clean database is reconstructed using migrations; no other application accesses these tables.
+
+#### Chapter 04: Resource search and API evolution
+
+**Outcome:** Consumers can filter and page through resources with predictable results as the API evolves.
+**Focus:** Search criteria, deterministic sorting, bounded pagination, query plans, compatible DTO changes, generated client types where appropriate.
+**Gate:** Tests cover combinations, empty results, stable ordering, page boundaries, and contract compatibility; query improvements are based on evidence.
+
+#### Chapter 05: Service security and organization scope
+
+**Outcome:** Resource reads and mutations are authenticated and scoped to the caller's organization.
+**Focus:** Spring Security resource-server patterns, JWT validation or an explicitly documented local identity, role checks, tenant-scoped queries, secrets/configuration, direct HTTP security tests.
+**Gate:** Unauthorized and cross-organization requests fail through the service API; no client-supplied organization or hidden UI control is trusted as authorization.
+
+### Phase 2: Return to the React frontend
+
+Begin after Chapter 05 passes the Resources Spring server completion gate. The frontend consumes the public Resources API; it does not import Java models or access service databases. Keep API correctness covered by backend tests.
+
+#### Chapter 06: Resource catalog client
+
+**Outcome:** The React/TypeScript client lists and inspects resources from the running Resources service.
+**Focus:** API client configuration, Vite proxy, generated or handwritten DTO types, loading/empty/error states, accessible rendering, component tests.
+**Gate:** UI content comes from the API; tests distinguish HTTP, network, and invalid-payload failures; browser DevTools confirms the real request path.
+
+#### Chapter 07: Resource management workflows
+
+**Outcome:** Authorized users create, edit, search, and archive resources with clear validation and conflict feedback.
+**Focus:** Forms, routing, server-state caching, mutation invalidation, authentication/session UX, accessible interactions, preserving form state after failures.
+**Gate:** Frontend tests verify meaningful user behavior, and server-side validation and authorization remain effective when requests bypass the UI.
+
+#### Chapter 08: Frontend and API verification
+
+**Outcome:** Browser tests verify the React client against the completed Resources service.
+**Focus:** Playwright, test data, API contract checks, controlled backend failures, responsive and keyboard workflows.
+**Gate:** Critical resource workflows pass against the real HTTP boundary; tests do not depend on backend implementation details or arbitrary sleeps.
+
+### Phase 3: Java microservices
+
+After returning to the UI, add a separate Java consumer to practice service-to-service communication and independent operation. The consumer must use the Resources API and must never access its database.
+
+#### Chapter 09: A separate Java API consumer
+
+**Outcome:** A small companion Spring Boot service consumes Resources over HTTP while remaining independently buildable and runnable.
+**Focus:** Separate service ownership and persistence, OpenAPI/client contract, Spring HTTP client, request deadlines, mapping remote errors, timeout and unavailable-service tests, safe retry/idempotency decisions.
+**Gate:** The consumer has no Resources database dependency; controlled tests prove behavior for successful, missing, invalid, slow, and unavailable Resources responses. Keep the companion domain small and do not move resource ownership out of Resources.
+
+#### Chapter 10: Operating the services
+
+**Outcome:** Run the independent Java services and their databases locally and inspect their health and behavior.
+**Focus:** Externalized configuration, profiles, Actuator health/readiness, structured logs, correlation IDs, basic metrics, Docker images, Docker Compose, startup/shutdown, CI boundaries.
+**Gate:** Each service can be built and started independently, then run together from documented local configuration; health and dependency failures are observable without leaking secrets.
+
+#### Chapter 11: Production and portfolio release
+
+**Outcome:** Publish a reproducible, secured demonstration of the independently deployable services and client.
+**Focus:** CI, configuration and secrets, migrations, container deployment, health checks, logging/metrics, performance investigation, backup/recovery, architecture documentation.
+**Gate:** Demonstrate clean builds, API and browser checks, service-failure behavior, documented deployment/recovery, and measured results. Report only checks actually run.
+
+### Legacy detailed chapter briefs
+
+The chapter descriptions below preserve useful exercises, test scenarios, debugging labs, and domain details from the previous outline. They are not the current sequence and their chapter numbers, prerequisites, and milestone groupings are superseded by the phase roadmap above. Use them as source material when generating the newly numbered guides; adjust dependencies so backend chapters remain ahead of all frontend implementation.
 
 ### Chapter 01: First working vertical slice
 
@@ -409,23 +470,22 @@ Chapters are independently generatable, not independent implementations. Each us
 **Debugging lab:** A deployment-only login loop caused by proxy/origin/cookie configuration, plus a slow page traced to the database rather than guessed frontend fixes.
 **Gate:** Deploy from documented instructions, show fresh test evidence, demonstrate recovery, and publish limitations honestly. Do not benchmark real public services without authorization.
 **Handoff:** Release checklist, CI commands, deployment/runbook, demo accounts, architecture decisions, performance evidence, and known limitations.
-**Extension:** Measure Java 21 virtual threads for blocking workloads, including database-pool limits, before claiming improvement. Do not add reactive programming solely for novelty.
+**Extension:** Measure virtual threads for blocking workloads on the selected JDK, including database-pool limits, before claiming improvement. Do not add reactive programming solely for novelty.
 
 ## 5. Milestones and scope control
 
 | Milestone | Chapters | Demonstrable result |
 | --- | --- | --- |
-| Foundation checkpoint | 01-05 | Tested persistent catalog and basic booking UI; local only |
-| Correct booking core | 06-08 | Time-aware, concurrency-safe, authenticated tenant-scoped booking |
-| Portfolio feature release | 09-11 | Accessible calendar, approvals, audit, recurring reservations |
-| Reliability release | 12-13 | Fair waitlists, live refresh, durable background processing |
-| Public portfolio release | 14 | Deployed application, CI, measured performance, recovery documentation |
+| Resources Spring server | 01-05 | Tested, persistent, documented, and secured Resources API; server completion gate |
+| Phase 2: React frontend | 06-08 | API-backed catalog and management workflows with browser verification |
+| Java microservices | 09-10 | Independent Java consumer plus observable local multi-service runtime |
+| Portfolio release | 11 | Integrated deployment, CI, measured performance, and recovery documentation |
 
 Foundations may be fast-tracked only by passing their gates. Never skip database integrity or authorization because a happy-path UI works. Optional extensions do not block the next core chapter. If motivation or available time changes, stop at a milestone and document limitations rather than adding unfinished features.
 
 ### Outside the core course
 
-- Microservices, Kubernetes, service meshes, event sourcing, and mandatory message brokers.
+- Kubernetes, service meshes, event sourcing, mandatory message brokers, service discovery, and API gateways unless a concrete later requirement justifies them.
 - Payments, pooled equipment quantities, marketplace settlement, and complex billing.
 - Native mobile applications or a bespoke calendar/recurrence engine.
 - AI features added only as portfolio decoration.
@@ -439,20 +499,17 @@ Update this table after each chapter. Detailed session history belongs in the le
 
 | Chapter | State | Evidence / next action |
 | --- | --- | --- |
-| 01 | Not started | Verify toolchain and generate chapter guide |
-| 02 | Not started | Requires 01 |
-| 03 | Not started | Requires 02 |
-| 04 | Not started | Requires 03 |
-| 05 | Not started | Requires 04 |
-| 06 | Not started | Requires 05 |
-| 07 | Not started | Requires 06 |
-| 08 | Not started | Requires 07 |
-| 09 | Not started | Requires 08 |
-| 10 | Not started | Requires 09 |
-| 11 | Not started | Requires 10 |
-| 12 | Not started | Requires 11 |
-| 13 | Not started | Requires 12 |
-| 14 | Not started | Requires 13 |
+| 01 | Not started | Requires existing project inspection; Resources service foundation |
+| 02 | Not started | Requires 01; resource lifecycle and API contracts |
+| 03 | Not started | Requires 02; service-owned PostgreSQL persistence |
+| 04 | Not started | Requires 03; search and API evolution |
+| 05 | Not started | Requires 04; service security and organization scope |
+| 06 | Not started | Requires completed Resources server (01-05); Phase 2 React catalog |
+| 07 | Not started | Requires 06; resource management workflows |
+| 08 | Not started | Requires 07; frontend/API browser verification |
+| 09 | Not started | Requires 08; separate Java API consumer |
+| 10 | Not started | Requires 09; local multi-service operations and observability |
+| 11 | Not started | Requires 10; production and portfolio release |
 
 ### Checkpoint template
 
@@ -477,7 +534,15 @@ Next smallest task:
 ```text
 Read COURSE_PLAN.md and generate the complete learning guide for Chapter NN only.
 For an optional algorithm lab, replace Chapter NN with Lab A1, A2, A3, or A4
-and use Section 10's prerequisites, contracts, references, and completion gates.
+and use the relevant algorithm-lab prerequisites, contracts, references, and gates.
+Use Section 4's authoritative Resources microservice roadmap for chapter number,
+scope, order, and prerequisites. Earlier booking-platform briefs are legacy topic
+references only and are outside the core course unless explicitly requested.
+Chapters 01-05 complete the Resources Spring server. Phase 2 is Chapters 06-08:
+return to React only after the Chapter 05 server completion gate. Chapters 09-10
+cover Java microservice integration and operations. The Resources service owns
+resource data; a companion Java consumer must use its HTTP contract and must
+never access its database directly.
 
 I will write all application and test code myself. Do not implement the app,
 execute the chapter tasks, or include complete implementation/test solutions.
@@ -510,6 +575,12 @@ Include:
    contracts, decisions, commands, limitations, and the next chapter's starting state.
 
 Preserve earlier contracts unless the chapter explicitly teaches a migration.
+Do not begin Phase 2 frontend work before the Resources server completion gate
+in Chapter 05. The repository may already contain frontend code; inspect it,
+distinguish completed work from the learning sequence, and reuse it without
+rewriting unrelated work. Match the
+actual Java and Spring versions in backend/pom.xml and docs/versions.md; surface
+any mismatch rather than silently changing the project baseline.
 Verify current stable framework compatibility when versions have not yet been
 recorded; do not silently upgrade an existing working application. Do not claim
 that unrun tests pass. Ask before adding major features outside this master plan.
@@ -531,15 +602,16 @@ small diagnostic step. Do not reveal the full fix unless I explicitly ask.
 
 ## 7. Portfolio evidence checklist
 
-- [ ] A README with the problem, actors, actual implemented scope, local startup, tests, and demo instructions.
-- [ ] A short architecture diagram and decisions covering capacity protection, tenant isolation, time semantics, authentication, and durable jobs.
-- [ ] A repeatable two-user concurrency demonstration that proves the persisted invariant.
-- [ ] Screenshots or a brief recording of calendar booking, approval, waitlist, and failure recovery.
-- [ ] Passing CI with meaningful unit, component, database, security, and browser checks.
+- [ ] A README with the Resources service boundary, owned data, API contract, local startup, tests, and demo instructions.
+- [ ] A service diagram showing Resources, its database, the separate Java consumer, and the React client; document which service owns each datum.
+- [ ] A direct API demonstration of resource creation, search, validation errors, and archival.
+- [ ] A service-to-service demonstration showing contract use and behavior when Resources is slow or unavailable.
+- [ ] Passing CI with meaningful unit, API, database, security, consumer contract, and browser checks.
 - [ ] Measured performance results with hardware/environment, dataset, method, and limitations disclosed.
-- [ ] Debugging writeups showing evidence, root cause, repair, and regression tests for selected real investigations.
-- [ ] A deployed demonstration with safe sample data, no committed secrets, and documented demo-account permissions.
-- [ ] A recovery runbook and an honest list of limitations and future extensions.
+- [ ] Debugging writeups showing evidence, root cause, repair, and regression tests for API and remote-service failures.
+- [ ] An independently deployable Resources service and a documented local multi-service run configuration.
+- [ ] A deployed demonstration with safe sample data, no committed secrets, and documented service configuration.
+- [ ] A recovery runbook and an honest list of limitations and future extensions, including any separately scoped booking service.
 
 ## 8. Master-plan validation
 
@@ -553,7 +625,7 @@ Read to solve the current exercise, not to postpone implementing it. Start with 
 
 Official documentation is the primary reference for behavior and APIs. Maintainer guides, standards, and specialist articles provide deeper explanations. Examples are learning material, not code to paste into the project without understanding.
 
-Versionless documentation and links containing `current`, `latest`, or `stable` can move to newer releases. Select documentation matching the versions recorded in the project. In particular, keep Java API references on Java 21 and use the JUnit generation and Spring APIs supported by the selected Spring Boot release. A working link is not proof of API compatibility.
+Versionless documentation and links containing `current`, `latest`, or `stable` can move to newer releases. Select documentation matching the versions recorded in the project. In particular, use Java API references matching the selected JDK and Spring APIs supported by the selected Spring Boot release. A working link is not proof of API compatibility.
 
 ### A. React, TypeScript, and browser fundamentals
 
@@ -569,12 +641,12 @@ Versionless documentation and links containing `current`, `latest`, or `stable` 
 | F8 | [TanStack Query: React Overview](https://tanstack.com/query/latest/docs/framework/react/overview) | Query keys, caching, mutations, invalidation, and retries. Explain server state versus form state. |
 | F9 | [Vite Guide](https://vite.dev/guide/) | Project setup, development proxy, environment variables, and production builds. Understand that client environment values are not secrets. |
 
-### B. Java 21, Spring, persistence, and HTTP
+### B. Java, Spring, persistence, and HTTP
 
 | ID | Source | Read for / apply to |
 | --- | --- | --- |
-| B1 | [Dev.java learning material](https://dev.java/learn/) | Targeted refreshers on records, exceptions, collections, streams, and JVM tools. Avoid newer-language examples unsupported by Java 21. |
-| B2 | [Java 21 java.time API](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/time/package-summary.html) | Instant, LocalDateTime, ZonedDateTime, ZoneId, Duration, and Clock. Explain the type at every booking boundary. |
+| B1 | [Dev.java learning material](https://dev.java/learn/) | Targeted refreshers on records, exceptions, collections, streams, and JVM tools. Match language features to the project's selected JDK. |
+| B2 | [Java 25 java.time API](https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/time/package-summary.html) | ZoneId and other time types used in resource metadata. Use the API version matching the selected project JDK. |
 | B3 | [Spring Boot Reference](https://docs.spring.io/spring-boot/reference/index.html) | Configuration, profiles, application startup, test support, and production features. Match the project's Boot version. |
 | B4 | [Spring Guides](https://spring.io/guides) | Short official exercises such as Building a RESTful Web Service and Testing the Web Layer. Transfer the concepts to resources rather than copying the sample app. |
 | B5 | [Spring MVC Reference](https://docs.spring.io/spring-framework/reference/web/webmvc.html) | Request mapping, DTO binding, validation, exception handling, and Problem Details responses. |
@@ -582,6 +654,9 @@ Versionless documentation and links containing `current`, `latest`, or `stable` 
 | B7 | [Spring transaction management](https://docs.spring.io/spring-framework/reference/data-access/transaction.html) | Declarative transactions, proxies, propagation, isolation, and rollback. Investigate self-invocation and ineffective boundaries. |
 | B8 | [Flyway documentation](https://documentation.red-gate.com/fd) | Versioned migrations, schema history, validation, and migration lifecycle. Rebuild the database from an empty instance. |
 | B9 | [RFC 9457: Problem Details for HTTP APIs](https://www.rfc-editor.org/rfc/rfc9457.html) | Standard error representation. Define stable application codes without leaking stack traces. |
+| B10 | [Spring Framework REST Clients](https://docs.spring.io/spring-framework/reference/integration/rest-clients.html) | Select and configure an HTTP client for the companion Java service; make timeouts and error handling explicit. |
+| B11 | [OpenAPI Specification](https://spec.openapis.org/oas/latest.html) | Describe the public Resources API and reason about compatible changes for independent consumers. |
+| B12 | [Spring Microservices](https://spring.io/microservices) | Spring's microservice overview and ecosystem orientation. Use it to understand the Java service context without adopting unnecessary infrastructure. |
 
 ### C. Writing useful automated tests
 
@@ -597,7 +672,7 @@ Versionless documentation and links containing `current`, `latest`, or `stable` 
 | T8 | [Testcontainers for Java](https://java.testcontainers.org/) | Real PostgreSQL integration tests, container lifecycle, isolation, and reproducible database setup. |
 | T9 | [Playwright introduction](https://playwright.dev/docs/intro) | Browser setup, isolated contexts, assertions, and critical end-to-end workflows. |
 | T10 | [Playwright best practices](https://playwright.dev/docs/best-practices) | User-facing locators, auto-waiting, independent tests, and diagnosing CI failures. |
-| T11 | [The Practical Test Pyramid](https://martinfowler.com/articles/practical-test-pyramid.html) | Specialist explanation of test boundaries and tradeoffs. Justify which layer should own each booking assertion. |
+| T11 | [The Practical Test Pyramid](https://martinfowler.com/articles/practical-test-pyramid.html) | Specialist explanation of test boundaries and tradeoffs. Justify which service boundary owns each assertion. |
 
 ### D. PostgreSQL correctness and performance
 
@@ -633,8 +708,9 @@ Versionless documentation and links containing `current`, `latest`, or `stable` 
 | O5 | [Transactional outbox pattern](https://microservices.io/patterns/data/transactional-outbox.html) | Specialist architecture reference for commit/publication failure windows and duplicate delivery. The pattern also applies to a monolith. |
 | O6 | [Spring Boot Actuator Reference](https://docs.spring.io/spring-boot/reference/actuator/index.html) | Health, metrics, endpoint exposure, and operational security. Do not publicly expose every endpoint. |
 | O7 | [GitHub Actions documentation](https://docs.github.com/en/actions) | Reproducible CI jobs, database dependencies, secrets, and failure artifacts. |
-| O8 | [Docker: Java guide](https://docs.docker.com/guides/java/) | Building and running Java applications in containers. Adapt examples to the selected Java 21 stack. |
+| O8 | [Docker: Java guide](https://docs.docker.com/guides/java/) | Building and running Java applications in containers. Adapt examples to the selected project JDK. |
 | O9 | [Grafana k6 documentation](https://grafana.com/docs/k6/latest/) | Workload modeling, thresholds, checks, and interpreting load-test results. Include correctness checks, not just request throughput. |
+| O10 | [Docker Compose documentation](https://docs.docker.com/compose/) | Define and run the local multi-service environment without coupling application builds or database ownership. |
 
 ### Chapter-by-chapter reading map
 
@@ -642,42 +718,39 @@ IDs refer to the tables above. Read the essential set first; use deeper material
 
 | Chapter | Essential starting references | Deeper or diagnostic references |
 | --- | --- | --- |
-| 01: Vertical slice | F1, F9, B3, B4 | F5, F6, T2, T7, O1, O2, O3 |
-| 02: Catalog | F2, F3, T3, T4 | F5, T2, F7 |
-| 03: Persistence | B6, B8, T8 | D4, D5, T7 |
-| 04: Forms/contracts | B5, B9, U2, F7 | F5, T2, T7 |
-| 05: Server state | F4, F6, F8, T5 | F3, T1, O2 |
-| 06: Time/domain rules | B2, D1, T6 | B1, T11 |
-| 07: Concurrency | B7, D1, D2, T8 | D3, T7 |
-| 08: Identity/organizations | S1, S2, S3, S4 | T7, O2 |
-| 09: Calendar/accessibility | U1, U2, B2, T9 | U3, T10, O4 |
-| 10: Administration | B7, S2, D1, T7 | D2, D3 |
-| 11: Recurrence | B2, U4, T6 | D1, T8 |
-| 12: Waitlists/live updates | D3, B5, F8, T8 | S1, D2, O4 |
-| 13: Durable jobs | O5, B7, T8, T5 | D3, O6 |
-| 14: Production | O6, O7, O8, O9 | D4, D5, T10, O4, S4 |
+| 01: Resources service foundation | B3, B4, B5, B12, T6, T7 | O3, O1, O2 |
+| 02: Resource lifecycle/contracts | B5, B9, B11, T7 | B4, T6 |
+| 03: Service-owned persistence | B6, B8, T8 | T7, D4 |
+| 04: Search/API evolution | B6, B11, D4, D5 | T8, T11 |
+| 05: Service security/scope | S1, S2, T7 | B3, O2 |
+| 06: React resource catalog | F1, F5, F6, T1, T2 | F9, O1, O2 |
+| 07: Resource management UI | F2, F7, F8, T3, T4, U2 | S1, T5 |
+| 08: Frontend/API browser tests | T9, T10, T5, O4 | O2, T11 |
+| 09: Java API consumer | B10, B11, B12, T7, T8 | B3, O3, O6 |
+| 10: Operating services | B3, O6, O7, O8, O10 | O9, O3 |
+| 11: Production release | O6, O7, O8, O9 | D4, D5, T10, O4 |
 
-MSW in Chapter 13 applies to frontend notification/job-status views; use backend HTTP stubs or a local capture server for backend provider tests. SSE material is under Spring MVC's asynchronous request/streaming documentation in B5. Choose the recurrence library during Chapter 11 after verifying maintenance, compatibility, license, and DST behavior; a standards link is not an implementation library recommendation.
+For Chapter 09, test remote behavior with a controlled HTTP server and the public API contract, not with direct database access. Use MSW for frontend network behavior in Chapters 06-08. Booking recurrence and SSE references below apply only if those features are later added to a separate service.
 
 ### Optional deeper study
 
 - [Designing Data-Intensive Applications](https://dataintensive.net/): a paid book, optional for deeper reasoning about transactions, replication, and delivery guarantees. It is not a prerequisite or a step-by-step Spring tutorial.
 - [Spring Academy](https://spring.academy/): guided Spring learning as a supplement; check current account/access requirements and choose material matching the project's release.
-- [Dev.java Watch and Listen](https://dev.java/learn/watchlisten/): videos and talks for Java/JVM topics; verify that an example uses Java 21-supported features before adopting it.
+- [Dev.java Watch and Listen](https://dev.java/learn/watchlisten/): videos and talks for Java/JVM topics; verify that an example uses features supported by the selected project JDK before adopting it.
 
 When a tutorial disagrees with official documentation or the recorded application policy, investigate the version and context instead of combining incompatible snippets. Record useful corrections and newly discovered references in the chapter handoff.
 
-## 10. Optional advanced algorithm track
+## 10. Optional booking-service algorithm extension
 
 ### Purpose and boundaries
 
-These four labs provide algorithm-intensive practice within the booking application. They are inspired by difficult interval, data-structure, graph, and optimization problems, not copies of LeetCode questions or a claim that every introductory variant is Hard. Difficulty increases through explicit constraints and extensions.
+These inherited labs provide algorithm-intensive practice for a separately approved booking-service extension. They are not features of the Resources service or part of the core course. They are inspired by difficult interval, data-structure, graph, and optimization problems, not copies of LeetCode questions or a claim that every introductory variant is Hard. Difficulty increases through explicit constraints and extensions.
 
-They do not block any core chapter or milestone. Generate and complete them independently when their prerequisites are satisfied; postpone all four until after Chapter 14 if keeping momentum on the main application is more useful.
+They do not block any core chapter or milestone. Generate them only after a booking service with the required data and contracts exists and the user chooses to pursue that extension. Their old chapter-number prerequisites refer to the superseded booking plan and must not be used as prerequisites for the current 11-chapter course.
 
-Implement the learning algorithms yourself in isolated Java 21 domain components, without Spring dependencies in their core logic. This is a deliberate educational exception to using proven libraries for production domain engines. Keep calendar rendering and recurrence parsing on maintained libraries. Compare with a maintained solver when useful, but do not delegate the learning task to it.
+Implement the learning algorithms yourself in isolated Java domain components, without Spring dependencies in their core logic. Match language features to the selected JDK. This is a deliberate educational exception to using proven libraries for production domain engines. Keep calendar rendering and recurrence parsing on maintained libraries. Compare with a maintained solver when useful, but do not delegate the learning task to it.
 
-Algorithm outputs are recommendations from a snapshot, not reservations. Any accepted recommendation must still pass authenticated, tenant-scoped, transactional booking rules and database capacity constraints. Never replace Chapter 07's integrity protection with an in-memory tree or scheduler.
+Algorithm outputs are recommendations from a snapshot, not reservations. Any accepted recommendation must still pass the booking service's authenticated, tenant-scoped, transactional rules and database constraints. Never replace database integrity protection with an in-memory tree or scheduler.
 
 ### Shared lab requirements
 
@@ -693,7 +766,7 @@ Algorithm outputs are recommendations from a snapshot, not reservations. Any acc
 
 ### Lab A1: Common availability across calendars
 
-**Prerequisites:** Chapters 06 and 07; Chapter 08 before exposing participant data through an API.
+**Prerequisites:** A separately implemented booking service with resource availability, participant calendars, and authenticated data access.
 **Starting state:** Tested interval rules and authoritative resource availability already exist.
 **Outcome:** Recommend meeting windows when every selected participant and at least one eligible resource are available.
 **Contract:** Inputs are a finite instant-based search window, positive meeting duration, participant availability intervals, and each eligible resource's available intervals. Normalize each calendar by clipping to the search window and merging overlapping or adjacent intervals. Return maximal continuous common windows per resource, retaining only windows at least as long as the duration; do not enumerate every possible start instant.
@@ -712,7 +785,7 @@ Algorithm outputs are recommendations from a snapshot, not reservations. Any acc
 
 ### Lab A2: Dynamic availability index
 
-**Prerequisites:** Chapters 07 and 08; Chapter 12 is useful for invalidation discussions but not required.
+**Prerequisites:** A booking service with persisted capacity intervals and an explicit policy for refreshing or invalidating any derived index.
 **Starting state:** Availability is computed from persisted capacity-blocking intervals.
 **Outcome:** Compare a linear availability index with a segment-tree index supporting repeated additions, removals, and range queries.
 **Contract:** The lab uses a finite fixed UTC horizon divided into five-minute cells. Updates carry unique interval IDs and grid-aligned half-open intervals. Adding an existing ID or removing an unknown ID fails without changing state. Each interval contributes +1 to covered cells; deleting it reverses exactly that contribution. Query whether the maximum occupancy over a non-empty range is zero. Reject out-of-horizon or non-grid inputs in the pure lab.
@@ -732,7 +805,7 @@ Algorithm outputs are recommendations from a snapshot, not reservations. Any acc
 
 ### Lab A3: Batch resource allocation
 
-**Prerequisites:** Chapters 07 and 08; familiarity with graph traversal through a short prerequisite exercise.
+**Prerequisites:** A booking service with organization-scoped requests, resource eligibility, and an authorized batch workflow; familiarity with graph traversal.
 **Starting state:** Members can request resources and managers can inspect organization-scoped availability.
 **Outcome:** A manager receives a maximum-cardinality allocation of pending requests to eligible resources for one shared time interval.
 **Contract:** Every request in the batch uses the same fixed interval and needs exactly one resource. An edge means that a resource satisfies that request's requirements and is available for the interval. Each request and resource may appear at most once in the result. Unmatched requests remain visible. Distinct resource IDs, not display names, define identity.
@@ -752,7 +825,7 @@ Algorithm outputs are recommendations from a snapshot, not reservations. Any acc
 
 ### Lab A4: Weighted booking optimization
 
-**Prerequisites:** Chapters 06 and 07; Chapter 08 before exposing organization requests.
+**Prerequisites:** A booking service with priority-bearing requests, persisted intervals, and authenticated organization scope.
 **Starting state:** The application can evaluate candidate intervals without confirming them.
 **Outcome:** Recommend the highest-total-priority compatible subset of requests for one resource.
 **Contract:** Requests have unique IDs, fixed half-open intervals, and non-negative integer priority scores; start precedes end. Remove candidates conflicting with already committed capacity before optimizing. Requests cannot move in time. Return selected IDs and total score; any maximum-score feasible subset is acceptable when tied. Use a numeric representation that can safely hold the total score.
@@ -771,7 +844,7 @@ Algorithm outputs are recommendations from a snapshot, not reservations. Any acc
 
 ### Algorithm references and reading map
 
-Use the conceptual sections first; some references expose complete implementations, so consult their code only after attempting the exercise. Translate examples to Java 21 yourself instead of copying another language's code.
+Use the conceptual sections first; some references expose complete implementations, so consult their code only after attempting the exercise. Translate examples to the selected Java version instead of copying another language's code.
 
 | ID | Reference | Purpose |
 | --- | --- | --- |
@@ -796,9 +869,9 @@ Use the existing chapter-generation prompt with the desired lab ID, for example:
 
 | Lab | State | Earliest recommended point |
 | --- | --- | --- |
-| A1 | Not started | After 07 for pure logic; after 08 for authorized integration |
-| A2 | Not started | After 08 |
-| A3 | Not started | After 08 |
-| A4 | Not started | After 07 for pure logic; after 08 for authorized integration |
+| A1 | Not started | After a booking service implements the required availability contracts |
+| A2 | Not started | After a booking service persists capacity intervals |
+| A3 | Not started | After a booking service implements organization-scoped batch requests |
+| A4 | Not started | After a booking service implements priority-bearing requests |
 
 For each completed lab, add an optional portfolio appendix containing the input contract, baseline and optimized complexity, correctness properties, reproducible benchmark method, observed crossover point, and the reason to adopt or reject production integration. Keep these achievements separate from unimplemented extensions and do not claim a formal LeetCode difficulty rating.
